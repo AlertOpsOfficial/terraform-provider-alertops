@@ -17,7 +17,7 @@ Complex nested fields like `security` (credentials) and `methods` (webhook defin
 
 ```terraform
 resource "alertops_outbound_integration" "webhook" {
-  outbound_integration_name = "PagerDuty Sync"
+  outbound_integration_name = "ServiceNow Sync"
   security_type             = "Basic"
 
   extra_attributes = {
@@ -33,7 +33,7 @@ resource "alertops_outbound_integration" "webhook" {
         method_type = {
           type               = "REST"
           web_method         = "POST"
-          uri                = "https://events.pagerduty.com/v2/enqueue"
+          uri                = "https://events.servicenow.com/v2/enqueue"
           request_type       = "JSON"
           response_data_type = "JSON"
           request_data       = jsonencode({
