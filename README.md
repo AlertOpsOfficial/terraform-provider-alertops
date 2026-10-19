@@ -14,7 +14,7 @@ The AlertOps Terraform provider allows you to manage your [AlertOps](https://ale
 terraform {
   required_providers {
     alertops = {
-      source  = "alertops/alertops"
+      source  = "kamsrikanth/alertops"
       version = "~> 2.0"
     }
   }
@@ -26,7 +26,7 @@ provider "alertops" {
 }
 ```
 
-See the [provider documentation](https://registry.terraform.io/providers/alertops/alertops/latest/docs) for full usage details.
+See the [provider documentation](https://registry.terraform.io/providers/kamsrikanth/alertops/latest/docs) for full usage details.
 
 ## Authentication
 

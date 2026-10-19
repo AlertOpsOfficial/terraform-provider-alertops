@@ -14,7 +14,7 @@ The AlertOps provider enables infrastructure-as-code management of your [AlertOp
 terraform {
   required_providers {
     alertops = {
-      source  = "alertops/alertops"
+      source  = "kamsrikanth/alertops"
       version = "~> 2.0"
     }
   }

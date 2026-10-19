@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     alertops = {
-      source  = "alertops/alertops"
+      source  = "kamsrikanth/alertops"
       version = "2.0.0"
     }
   }
