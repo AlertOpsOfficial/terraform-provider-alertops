@@ -123,6 +123,8 @@ resource "alertops_group" "all_engineering" {
 - `enabled` (Boolean, Optional) Whether this contact method is active. Defaults to `true`.
 - `sequence` (Number, Optional) The order of this contact method. Defaults to `1`.
 
+~> **Note:** When a schedule assigns roles to its users (for example a rotating schedule with a `users` list), AlertOps manages roles per shift and clears group-level member `roles`. Omit `roles` for those members so AlertOps can manage them; setting roles there causes Terraform to keep planning to restore them.
+
 ## Attributes Reference
 
 - `id` (String) The unique numeric identifier of the group, assigned by AlertOps.

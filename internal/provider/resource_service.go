@@ -316,6 +316,10 @@ func (r *ServiceResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 	respBody, err := r.client.Get(ctx, "/services/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Error reading service", err.Error())
 		return
 	}
@@ -391,6 +395,9 @@ func (r *ServiceResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	_, err := r.client.Delete(ctx, "/services/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Error deleting service", err.Error())
 		return
 	}

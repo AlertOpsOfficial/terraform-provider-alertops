@@ -350,17 +350,17 @@ func mergeExtraAttributes(ctx context.Context, extra types.Map, payload map[stri
 }
 
 type userModel struct {
-	ID             types.String `tfsdk:"id"`
-	UserName       types.String `tfsdk:"user_name"`
-	FirstName      types.String `tfsdk:"first_name"`
-	LastName       types.String `tfsdk:"last_name"`
-	Locale         types.String `tfsdk:"locale"`
-	TimeZone       types.String `tfsdk:"time_zone"`
-	Type           types.String `tfsdk:"type"`
-	ExternalID     types.String `tfsdk:"external_id"`
-	Roles          types.List   `tfsdk:"roles"`
-	ContactMethods types.List   `tfsdk:"contact_methods"`
-	ExtraAttributes types.Map   `tfsdk:"extra_attributes"`
+	ID              types.String `tfsdk:"id"`
+	UserName        types.String `tfsdk:"user_name"`
+	FirstName       types.String `tfsdk:"first_name"`
+	LastName        types.String `tfsdk:"last_name"`
+	Locale          types.String `tfsdk:"locale"`
+	TimeZone        types.String `tfsdk:"time_zone"`
+	Type            types.String `tfsdk:"type"`
+	ExternalID      types.String `tfsdk:"external_id"`
+	Roles           types.List   `tfsdk:"roles"`
+	ContactMethods  types.List   `tfsdk:"contact_methods"`
+	ExtraAttributes types.Map    `tfsdk:"extra_attributes"`
 }
 
 func (r *UserResource) buildPayload(ctx context.Context, plan *userModel) (map[string]interface{}, error) {
@@ -453,13 +453,48 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 	plan.ID = types.StringValue(fmt.Sprintf("%d", int(userID)))
+	// Save the ID immediately so a failure below does not orphan the user.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), plan.ID)...)
 
-	if err := r.applyAPIResponse(ctx, result, &plan); err != nil {
-		resp.Diagnostics.AddError("Error processing user response", err.Error())
+	// The API ignores time_zone and locale on create (the account defaults are applied),
+	// but honours them on update, so apply them with a follow-up PUT when they differ.
+	wantTimeZone, wantLocale := plan.TimeZone.ValueString(), plan.Locale.ValueString()
+	if gotTimeZone, gotLocale := mapString(result, "time_zone"), mapString(result, "locale"); gotTimeZone != wantTimeZone || gotLocale != wantLocale {
+		if _, err := r.client.Put(ctx, "/users/"+plan.ID.ValueString(), payload); err != nil {
+			resp.Diagnostics.AddError("Error setting user time zone and locale after create", err.Error())
+			return
+		}
+	}
+
+	if err := r.refresh(ctx, &plan); err != nil {
+		resp.Diagnostics.AddError("Error reading user after create", err.Error())
 		return
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// refresh reads the user from the API into the model. Write responses do not include every
+// field (e.g. contact methods), so state is always taken from a GET.
+func (r *UserResource) refresh(ctx context.Context, model *userModel) error {
+	respBody, err := r.client.Get(ctx, "/users/"+model.ID.ValueString())
+	if err != nil {
+		return err
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("error parsing user response: %w", err)
+	}
+
+	model.UserName = types.StringValue(mapString(result, "user_name"))
+	model.FirstName = types.StringValue(mapString(result, "first_name"))
+	model.LastName = types.StringValue(mapString(result, "last_name"))
+	model.Locale = types.StringValue(mapString(result, "locale"))
+	model.TimeZone = types.StringValue(mapString(result, "time_zone"))
+	model.Type = types.StringValue(mapString(result, "type"))
+
+	return r.applyAPIResponse(ctx, result, model)
 }
 
 func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -469,27 +504,12 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	respBody, err := r.client.Get(ctx, "/users/"+state.ID.ValueString())
-	if err != nil {
+	if err := r.refresh(ctx, &state); err != nil {
+		if IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Error reading user", err.Error())
-		return
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		resp.Diagnostics.AddError("Error parsing user response", err.Error())
-		return
-	}
-
-	state.UserName = types.StringValue(result["user_name"].(string))
-	state.FirstName = types.StringValue(result["first_name"].(string))
-	state.LastName = types.StringValue(result["last_name"].(string))
-	state.Locale = types.StringValue(result["locale"].(string))
-	state.TimeZone = types.StringValue(result["time_zone"].(string))
-	state.Type = types.StringValue(result["type"].(string))
-
-	if err := r.applyAPIResponse(ctx, result, &state); err != nil {
-		resp.Diagnostics.AddError("Error processing user response", err.Error())
 		return
 	}
 
@@ -509,20 +529,13 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 
-	respBody, err := r.client.Put(ctx, "/users/"+plan.ID.ValueString(), payload)
-	if err != nil {
+	if _, err := r.client.Put(ctx, "/users/"+plan.ID.ValueString(), payload); err != nil {
 		resp.Diagnostics.AddError("Error updating user", err.Error())
 		return
 	}
 
-	var result map[string]interface{}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		resp.Diagnostics.AddError("Error parsing user response", err.Error())
-		return
-	}
-
-	if err := r.applyAPIResponse(ctx, result, &plan); err != nil {
-		resp.Diagnostics.AddError("Error processing user response", err.Error())
+	if err := r.refresh(ctx, &plan); err != nil {
+		resp.Diagnostics.AddError("Error reading user after update", err.Error())
 		return
 	}
 
@@ -538,6 +551,9 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 
 	_, err := r.client.Delete(ctx, "/users/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Error deleting user", err.Error())
 		return
 	}

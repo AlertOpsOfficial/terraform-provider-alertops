@@ -324,6 +324,10 @@ func (r *MaintenanceWindowResource) Read(ctx context.Context, req resource.ReadR
 
 	respBody, err := r.client.Get(ctx, "/maintenancewindows/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Error reading maintenance window", err.Error())
 		return
 	}
@@ -361,9 +365,15 @@ func (r *MaintenanceWindowResource) Update(ctx context.Context, req resource.Upd
 		return
 	}
 
-	respBody, err := r.client.Put(ctx, "/maintenancewindows/"+state.ID.ValueString(), payload)
-	if err != nil {
+	if _, err := r.client.Put(ctx, "/maintenancewindows/"+state.ID.ValueString(), payload); err != nil {
 		resp.Diagnostics.AddError("Error updating maintenance window", err.Error())
+		return
+	}
+
+	// The PUT returns 204 No Content, so read the window back.
+	respBody, err := r.client.Get(ctx, "/maintenancewindows/"+state.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading maintenance window after update", err.Error())
 		return
 	}
 
@@ -391,6 +401,9 @@ func (r *MaintenanceWindowResource) Delete(ctx context.Context, req resource.Del
 
 	_, err := r.client.Delete(ctx, "/maintenancewindows/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Error deleting maintenance window", err.Error())
 		return
 	}

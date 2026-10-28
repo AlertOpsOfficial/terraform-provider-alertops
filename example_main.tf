@@ -145,19 +145,19 @@ resource "alertops_inbound_integration" "test" {
 resource "alertops_maintenance_window" "test" {
   description = "TF CRUD Test Maintenance Window"
   recurrence  = "Once"
-  start_date  = "2026-04-01"
-  end_date    = "2026-04-01"
+  start_date  = "2027-04-01"
+  end_date    = "2027-04-01"
   start_time  = "02:00"
   end_time    = "04:00"
   integration = [tostring(alertops_inbound_integration.test.id)]
   # For recurrence = "Once", the API ignores weekday fields and returns all false
-  sunday      = false
-  monday      = false
-  tuesday     = false
-  wednesday   = false
-  thursday    = false
-  friday      = false
-  saturday    = false
+  sunday    = false
+  monday    = false
+  tuesday   = false
+  wednesday = false
+  thursday  = false
+  friday    = false
+  saturday  = false
 
   depends_on = [alertops_inbound_integration.test]
 }
