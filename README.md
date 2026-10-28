@@ -131,7 +131,7 @@ resource "alertops_inbound_integration" "my_app" {
 ## Building From Source
 
 ```shell
-git clone https://github.com/alertops/terraform-provider-alertops
+git clone https://github.com/AlertOpsOfficial/terraform-provider-alertops
 cd terraform-provider-alertops
 go build ./...
 ```
