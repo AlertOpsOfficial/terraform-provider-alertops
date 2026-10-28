@@ -122,6 +122,9 @@ func parseOutboundFromAPI(result map[string]interface{}, state *outboundIntegrat
 	}
 	if v, ok := result["interval_in_sec"].(float64); ok {
 		state.IntervalInSec = types.Int64Value(int64(v))
+	} else if state.IntervalInSec.IsNull() {
+		// Not returned by the API; use the schema default so imports do not plan a change.
+		state.IntervalInSec = types.Int64Value(0)
 	}
 	if v, ok := result["enabled"].(bool); ok {
 		state.Enabled = types.BoolValue(v)
@@ -179,6 +182,10 @@ func (r *OutboundIntegrationResource) Read(ctx context.Context, req resource.Rea
 
 	respBody, err := r.client.Get(ctx, "/integrations/outbound/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Error reading outbound integration", err.Error())
 		return
 	}
@@ -212,9 +219,15 @@ func (r *OutboundIntegrationResource) Update(ctx context.Context, req resource.U
 		return
 	}
 
-	respBody, err := r.client.Put(ctx, "/integrations/outbound/"+state.ID.ValueString(), payload)
-	if err != nil {
+	if _, err := r.client.Put(ctx, "/integrations/outbound/"+state.ID.ValueString(), payload); err != nil {
 		resp.Diagnostics.AddError("Error updating outbound integration", err.Error())
+		return
+	}
+
+	// Update responses may be empty (204 No Content), so read the integration back.
+	respBody, err := r.client.Get(ctx, "/integrations/outbound/"+state.ID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading outbound integration after update", err.Error())
 		return
 	}
 
@@ -238,6 +251,9 @@ func (r *OutboundIntegrationResource) Delete(ctx context.Context, req resource.D
 
 	_, err := r.client.Delete(ctx, "/integrations/outbound/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Error deleting outbound integration", err.Error())
 		return
 	}

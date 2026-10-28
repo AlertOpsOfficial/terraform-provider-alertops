@@ -489,6 +489,10 @@ func (r *GroupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 
 	respBody, err := r.client.Get(ctx, "/groups/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Error reading group", err.Error())
 		return
 	}
@@ -564,6 +568,9 @@ func (r *GroupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 
 	_, err := r.client.Delete(ctx, "/groups/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Error deleting group", err.Error())
 		return
 	}
