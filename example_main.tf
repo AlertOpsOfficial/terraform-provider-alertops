@@ -2,7 +2,7 @@ terraform {
   required_providers {
     alertops = {
       source  = "alertopsofficial/alertops"
-      version = "2.0.0"
+      version = "~> 2.1"
     }
   }
 }
@@ -10,6 +10,12 @@ terraform {
 provider "alertops" {
   # Set via ALERTOPS_API_KEY environment variable or uncomment below:
   # api_key = var.alertops_api_key
+}
+
+# Password the outbound integration example uses for Basic auth.
+variable "outbound_basic_auth_password" {
+  type      = string
+  sensitive = true
 }
 
 # ============================================================
@@ -181,7 +187,7 @@ resource "alertops_outbound_integration" "test" {
   extra_attributes = {
     "security" = jsonencode({
       user_name = "tf-test@example.com"
-      password  = "TFTestPassword123"
+      password  = var.outbound_basic_auth_password
     })
     "methods" = jsonencode([
       {
