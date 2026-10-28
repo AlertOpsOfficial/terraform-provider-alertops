@@ -1,4 +1,4 @@
-module github.com/alertops/terraform-provider-alertops
+module github.com/AlertOpsOfficial/terraform-provider-alertops
 
 go 1.25.8
 
