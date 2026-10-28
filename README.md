@@ -14,7 +14,7 @@ The AlertOps Terraform provider allows you to manage your [AlertOps](https://ale
 terraform {
   required_providers {
     alertops = {
-      source  = "alertops/alertops"
+      source  = "alertopsofficial/alertops"
       version = "~> 2.0"
     }
   }
@@ -26,7 +26,7 @@ provider "alertops" {
 }
 ```
 
-See the [provider documentation](https://registry.terraform.io/providers/alertops/alertops/latest/docs) for full usage details.
+See the [provider documentation](https://registry.terraform.io/providers/alertopsofficial/alertops/latest/docs) for full usage details.
 
 ## Authentication
 
@@ -155,7 +155,7 @@ Point Terraform at it with a CLI config file (e.g. `dev.tfrc`) and `TF_CLI_CONFI
 ```hcl
 provider_installation {
   dev_overrides {
-    "registry.terraform.io/alertops/alertops" = "C:/path/to/terraform-provider-alertops/bin"
+    "registry.terraform.io/alertopsofficial/alertops" = "C:/path/to/terraform-provider-alertops/bin"
   }
   direct {}
 }
