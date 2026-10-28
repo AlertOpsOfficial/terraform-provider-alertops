@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.1.0 (unreleased)
+## 2.1.0 (October 28, 2026)
 
 ### Registry namespace
 
