@@ -189,13 +189,13 @@ func (r *ScheduleResource) Configure(_ context.Context, req resource.ConfigureRe
 
 func (r *ScheduleResource) buildPayload(ctx context.Context, plan *scheduleModel) map[string]interface{} {
 	payload := map[string]interface{}{
-		"group":         plan.Group.ValueString(),
-		"schedule_name": plan.ScheduleName.ValueString(),
-		"schedule_type": plan.ScheduleType.ValueString(),
-		"continuous":    plan.Continuous.ValueBool(),
+		"group":                      plan.Group.ValueString(),
+		"schedule_name":              plan.ScheduleName.ValueString(),
+		"schedule_type":              plan.ScheduleType.ValueString(),
+		"continuous":                 plan.Continuous.ValueBool(),
 		"include_all_users_in_group": plan.IncludeAllUsersInGroup.ValueBool(),
-		"enabled":   plan.Enabled.ValueBool(),
-		"time_zone": plan.TimeZone.ValueString(),
+		"enabled":                    plan.Enabled.ValueBool(),
+		"time_zone":                  plan.TimeZone.ValueString(),
 		"schedule_weekdays": map[string]interface{}{
 			"sun": plan.WeekdaySun.ValueBool(),
 			"mon": plan.WeekdayMon.ValueBool(),
@@ -324,6 +324,10 @@ func (r *ScheduleResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	respBody, err := r.client.Get(ctx, fmt.Sprintf("/schedules/%s/%s", groupID, scheduleID))
 	if err != nil {
+		if IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Error reading schedule", err.Error())
 		return
 	}
@@ -335,6 +339,21 @@ func (r *ScheduleResource) Read(ctx context.Context, req resource.ReadRequest, r
 	}
 
 	r.applyAPIResponse(result, &state)
+
+	// After import only the ID is known; the API returns the group ID, so look up its name.
+	if state.Group.IsNull() || state.Group.ValueString() == "" {
+		groupBody, err := r.client.Get(ctx, "/groups/"+groupID)
+		if err != nil {
+			resp.Diagnostics.AddError("Error reading schedule group", err.Error())
+			return
+		}
+		group, err := decodeObject(groupBody)
+		if err != nil {
+			resp.Diagnostics.AddError("Error parsing schedule group", err.Error())
+			return
+		}
+		state.Group = types.StringValue(mapString(group, "group_name"))
+	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -361,9 +380,16 @@ func (r *ScheduleResource) Update(ctx context.Context, req resource.UpdateReques
 
 	payload := r.buildPayload(ctx, &plan)
 
-	respBody, err := r.client.Put(ctx, fmt.Sprintf("/schedules/%s/%s", groupID, scheduleID), payload)
-	if err != nil {
+	if _, err := r.client.Put(ctx, fmt.Sprintf("/schedules/%s/%s", groupID, scheduleID), payload); err != nil {
 		resp.Diagnostics.AddError("Error updating schedule", err.Error())
+		return
+	}
+
+	// The PUT returns no body, and AlertOps derives some fields (e.g. weekdays from the
+	// start/end weekday range), so read the schedule back.
+	respBody, err := r.client.Get(ctx, fmt.Sprintf("/schedules/%s/%s", groupID, scheduleID))
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading schedule after update", err.Error())
 		return
 	}
 
@@ -396,6 +422,9 @@ func (r *ScheduleResource) Delete(ctx context.Context, req resource.DeleteReques
 
 	_, err := r.client.Delete(ctx, fmt.Sprintf("/schedules/%s/%s", groupID, scheduleID))
 	if err != nil {
+		if IsNotFound(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Error deleting schedule", err.Error())
 		return
 	}

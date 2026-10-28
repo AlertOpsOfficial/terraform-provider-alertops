@@ -44,6 +44,8 @@ resource "alertops_maintenance_window" "deployment" {
 resource "alertops_maintenance_window" "nightly_backup" {
   description = "Nightly backup window"
   recurrence  = "Weekly"
+  start_date  = "2026-11-02"
+  end_date    = "2027-12-31"
   start_time  = "22:00"
   end_time    = "23:00"
 
@@ -84,6 +86,8 @@ resource "alertops_maintenance_window" "monthly_patching" {
   saturday  = true
 }
 ```
+
+~> **Note:** The AlertOps API requires `start_date` and `end_date` for every recurrence (without them it fails with an HTTP 500), and every integration listed in `integration` must be **enabled**, otherwise it is rejected as invalid.
 
 ## Argument Reference
 

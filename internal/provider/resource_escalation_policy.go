@@ -50,11 +50,11 @@ var memberRoleAttrTypes = map[string]attr.Type{
 }
 
 var epOptionsAttrTypes = map[string]attr.Type{
-	"sla_in_hours":                  types.Int64Type,
-	"include_alert_id_in_subject":   types.BoolType,
-	"one_email_per_message":         types.BoolType,
-	"one_message_per_recipient":     types.BoolType,
-	"sequence_group_first":          types.BoolType,
+	"sla_in_hours":                types.Int64Type,
+	"include_alert_id_in_subject": types.BoolType,
+	"one_email_per_message":       types.BoolType,
+	"one_message_per_recipient":   types.BoolType,
+	"sequence_group_first":        types.BoolType,
 }
 
 type escalationPolicyModel struct {
@@ -68,6 +68,7 @@ type escalationPolicyModel struct {
 	WaitTimeBeforeNotifyingNextGroupInMin types.Int64  `tfsdk:"wait_time_before_notifying_next_group_in_min"`
 	Options                               types.Object `tfsdk:"options"`
 	MemberRoles                           types.List   `tfsdk:"member_roles"`
+	Workflows                             types.Set    `tfsdk:"workflows"`
 	ExtraAttributes                       types.Map    `tfsdk:"extra_attributes"`
 }
 
@@ -236,6 +237,12 @@ func (r *EscalationPolicyResource) Schema(_ context.Context, _ resource.SchemaRe
 					},
 				},
 			},
+			"workflows": schema.SetAttribute{
+				Optional:            true,
+				Computed:            true,
+				ElementType:         types.Int64Type,
+				MarkdownDescription: "IDs of the workflows attached to this escalation policy (e.g. `alertops_workflow.example.id`). When set, the provider attaches and detaches workflows so that exactly these are attached, including any default workflow AlertOps adds to new policies. Only enabled workflows can be attached. When omitted, attached workflows are left unmanaged.",
+			},
 			"extra_attributes": schema.MapAttribute{
 				Optional:            true,
 				ElementType:         types.StringType,
@@ -260,10 +267,10 @@ func (r *EscalationPolicyResource) Configure(_ context.Context, req resource.Con
 
 func buildEPPayload(ctx context.Context, plan *escalationPolicyModel) (map[string]interface{}, error) {
 	payload := map[string]interface{}{
-		"escalation_policy_name":                       plan.EscalationPolicyName.ValueString(),
-		"enabled":                                      plan.Enabled.ValueBool(),
-		"quick_launch":                                 plan.QuickLaunch.ValueBool(),
-		"notify_using_centralized_settings":            plan.NotifyUsingCentralizedSettings.ValueBool(),
+		"escalation_policy_name":            plan.EscalationPolicyName.ValueString(),
+		"enabled":                           plan.Enabled.ValueBool(),
+		"quick_launch":                      plan.QuickLaunch.ValueBool(),
+		"notify_using_centralized_settings": plan.NotifyUsingCentralizedSettings.ValueBool(),
 		"wait_time_before_notifying_next_group_in_min": plan.WaitTimeBeforeNotifyingNextGroupInMin.ValueInt64(),
 	}
 	if plan.Description.ValueString() != "" {
@@ -493,7 +500,39 @@ func parseEPFromAPI(ctx context.Context, result map[string]interface{}, state *e
 		state.MemberRoles = types.ListValueMust(types.ObjectType{AttrTypes: memberRoleAttrTypes}, []attr.Value{})
 	}
 
+	state.Workflows = int64Set(workflowIDsFromAPI(mapArray(result, "workflows")))
+
 	return nil
+}
+
+// syncWorkflows reconciles attached workflows when they are configured and returns the
+// refreshed policy if anything changed.
+func (r *EscalationPolicyResource) syncWorkflows(ctx context.Context, id string, desired types.Set, result map[string]interface{}) (map[string]interface{}, error) {
+	if !isKnown(desired) {
+		return result, nil
+	}
+	basePath := "/escalation_policies/" + id
+	if _, ok := result["workflows"]; !ok {
+		body, err := r.client.Get(ctx, basePath)
+		if err != nil {
+			return nil, err
+		}
+		if result, err = decodeObject(body); err != nil {
+			return nil, err
+		}
+	}
+	current := workflowIDsFromAPI(mapArray(result, "workflows"))
+	if int64Set(current).Equal(int64Set(int64sFromSet(desired))) {
+		return result, nil
+	}
+	if err := reconcileWorkflowAttachments(ctx, r.client, basePath, current, int64sFromSet(desired)); err != nil {
+		return nil, err
+	}
+	body, err := r.client.Get(ctx, basePath)
+	if err != nil {
+		return nil, err
+	}
+	return decodeObject(body)
 }
 
 func (r *EscalationPolicyResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -531,6 +570,12 @@ func (r *EscalationPolicyResource) Create(ctx context.Context, req resource.Crea
 		return
 	}
 
+	result, err = r.syncWorkflows(ctx, plan.ID.ValueString(), plan.Workflows, result)
+	if err != nil {
+		resp.Diagnostics.AddError("Error updating escalation policy workflows", err.Error())
+		return
+	}
+
 	if err := parseEPFromAPI(ctx, result, &plan); err != nil {
 		resp.Diagnostics.AddError("Error processing escalation policy response", err.Error())
 		return
@@ -548,6 +593,10 @@ func (r *EscalationPolicyResource) Read(ctx context.Context, req resource.ReadRe
 
 	respBody, err := r.client.Get(ctx, "/escalation_policies/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Error reading escalation policy", err.Error())
 		return
 	}
@@ -634,6 +683,12 @@ func (r *EscalationPolicyResource) Update(ctx context.Context, req resource.Upda
 		}
 	}
 
+	result, err = r.syncWorkflows(ctx, state.ID.ValueString(), plan.Workflows, result)
+	if err != nil {
+		resp.Diagnostics.AddError("Error updating escalation policy workflows", err.Error())
+		return
+	}
+
 	if err := parseEPFromAPI(ctx, result, &plan); err != nil {
 		resp.Diagnostics.AddError("Error processing escalation policy response", err.Error())
 		return
@@ -651,6 +706,9 @@ func (r *EscalationPolicyResource) Delete(ctx context.Context, req resource.Dele
 
 	_, err := r.client.Delete(ctx, "/escalation_policies/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Error deleting escalation policy", err.Error())
 		return
 	}

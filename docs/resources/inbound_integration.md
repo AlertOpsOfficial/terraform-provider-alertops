@@ -60,6 +60,22 @@ resource "alertops_inbound_integration" "app_alerts" {
 }
 ```
 
+### Integration routed through a response play
+
+```terraform
+resource "alertops_inbound_integration" "newrelic" {
+  inbound_integration_name = "New Relic"
+  type                     = "API"
+  response_play            = alertops_response_play.newrelic.id
+}
+
+# Pass the generated endpoint to the monitoring tool.
+output "newrelic_webhook_url" {
+  value     = alertops_inbound_integration.newrelic.api_url
+  sensitive = true
+}
+```
+
 ### Email integration
 
 ```terraform
@@ -68,6 +84,11 @@ resource "alertops_inbound_integration" "email_alerts" {
   type                     = "Email"
   enabled                  = true
   recipient_groups         = [alertops_group.ops_team.group_name]
+
+  # Email integrations require a mailbox name.
+  extra_attributes = {
+    mail_box = "email-alerts"
+  }
 }
 ```
 
@@ -93,15 +114,20 @@ resource "alertops_inbound_integration" "heartbeat" {
 
 - `enabled` (Boolean) Whether the integration is active. Defaults to `true`.
 - `sequence` (Number) The processing sequence order of the integration. Defaults to `1`.
-- `escalation_policy` (String) The name of the escalation policy to use for routing alerts.
+- `escalation_policy` (String) The name of the escalation policy to use for routing alerts. Conflicts with `response_play`.
+- `response_play` (String) The ID of the response play to use for routing alerts, e.g. `alertops_response_play.example.id`. Conflicts with `escalation_policy`.
 - `recipient_groups` (List of String) Names of groups that will receive alerts from this integration.
 - `recipient_users` (List of String) Usernames of users that will receive alerts from this integration.
 - `inbound_template_id` (Number) The ID of the inbound template to apply to incoming alerts. Defaults to `0`.
 - `extra_attributes` (Map of String) Additional fields to merge into the API request payload. Use `jsonencode()` for nested objects like `api_settings`, `email_settings`, `chat_settings`.
 
+~> **Note:** AlertOps requires a URL mapping for `API` integrations. If `api_settings` is not supplied in `extra_attributes`, the provider sends the same default mapping as the AlertOps "Custom" API template (source `Custom`, open an alert for every POST).
+
 ## Attributes Reference
 
 - `id` (String) The unique numeric identifier of the integration, assigned by AlertOps.
+- `api_url` (String, Sensitive) The generated endpoint URL that monitoring tools post alerts to. It contains a secret token.
+- `response_play_name` (String) The name of the response play the integration uses, if any.
 
 ## Import
 

@@ -5,7 +5,7 @@ The AlertOps Terraform provider allows you to manage your [AlertOps](https://ale
 ## Requirements
 
 - [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
-- [Go](https://golang.org/doc/install) >= 1.24 (to build from source)
+- [Go](https://golang.org/doc/install) >= 1.25.8 (to build from source)
 - An AlertOps account with API access
 
 ## Using the Provider
@@ -56,6 +56,9 @@ provider "alertops" {
 | `alertops_outbound_integration` | Manage outbound webhook integrations |
 | `alertops_service` | Manage services with uptime tracking |
 | `alertops_maintenance_window` | Manage maintenance windows to suppress alerts |
+| `alertops_response_play` | Manage response plays: escalation paths of users and groups with wait times |
+| `alertops_workflow` | Manage workflows (conditions and actions, e.g. notify on acknowledge/close) |
+| `alertops_topic` | Manage topics and the groups subscribed to them |
 
 ## Quick Start Example
 
@@ -139,21 +142,56 @@ To install locally for testing:
 go install ./...
 ```
 
+### Testing a local build with Terraform
+
+Build the binary for the platform of your Terraform CLI (`terraform version` shows it, e.g. `windows_386` or `windows_amd64`):
+
+```shell
+GOOS=windows GOARCH=386 go build -o bin/terraform-provider-alertops.exe .
+```
+
+Point Terraform at it with a CLI config file (e.g. `dev.tfrc`) and `TF_CLI_CONFIG_FILE`:
+
+```hcl
+provider_installation {
+  dev_overrides {
+    "registry.terraform.io/alertops/alertops" = "C:/path/to/terraform-provider-alertops/bin"
+  }
+  direct {}
+}
+```
+
+```shell
+export TF_CLI_CONFIG_FILE=dev.tfrc
+export ALERTOPS_API_KEY="your-api-key"
+```
+
+`terraform init` is not needed with `dev_overrides`.
+
+## Testing
+
+Unit tests run offline, without an API key:
+
+```shell
+go test ./...
+```
+
+Live end-to-end suites are in `examples/`. They create real objects (all named `TF Test ...`, integrations disabled, contact details on reserved `example.com` addresses), so run them against a test account:
+
+| Suite | What it covers |
+|---|---|
+| `examples/regression` | Every resource type and the complex arguments. `terraform apply`, then `terraform apply -var revision=2` to exercise adds/removes/changes of nested items, then `terraform destroy -var revision=2`. After every apply, `terraform plan` must report "No changes". |
+| `examples/full-stack` | A simple user → group → schedule → escalation policy → response play → integrations stack, with `-var revision=2` updates. |
+| `examples/tf-test` | Response play, workflow, topic and escalation policy wiring using existing users/groups (`-var user_id=... -var group_id=... -var group_name=...`). |
+
+The regression suite skips `alertops_service` (needs the Business Services plan) and `alertops_outbound_integration` by default; enable them with `-var test_services=true` / `-var test_outbound=true`.
+
+Because the API allows only 15 requests per minute, a full regression run takes 10–15 minutes.
+
 ## Developing the Provider
 
-To run acceptance tests (requires a real AlertOps API key):
-
-```shell
-export ALERTOPS_API_KEY="your-api-key"
-make testacc
-```
-
-To regenerate documentation:
-
-```shell
-make generate
-```
+The resource documentation in `docs/` is maintained by hand. Do not run `make generate` (tfplugindocs) without first adding templates under `templates/`, or it will overwrite the hand-written examples.
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+Mozilla Public License 2.0 — see [LICENSE](LICENSE).
