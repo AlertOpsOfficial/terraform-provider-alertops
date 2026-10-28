@@ -5,7 +5,7 @@ import (
 	"flag"
 	"log"
 
-	"github.com/alertops/terraform-provider-alertops/internal/provider"
+	"github.com/AlertOpsOfficial/terraform-provider-alertops/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
 
