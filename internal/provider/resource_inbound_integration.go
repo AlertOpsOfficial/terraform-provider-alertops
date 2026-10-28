@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -16,9 +17,10 @@ import (
 )
 
 var (
-	_ resource.Resource                = &InboundIntegrationResource{}
-	_ resource.ResourceWithConfigure   = &InboundIntegrationResource{}
-	_ resource.ResourceWithImportState = &InboundIntegrationResource{}
+	_ resource.Resource                   = &InboundIntegrationResource{}
+	_ resource.ResourceWithConfigure      = &InboundIntegrationResource{}
+	_ resource.ResourceWithImportState    = &InboundIntegrationResource{}
+	_ resource.ResourceWithValidateConfig = &InboundIntegrationResource{}
 )
 
 func NewInboundIntegrationResource() resource.Resource {
@@ -36,10 +38,33 @@ type inboundIntegrationModel struct {
 	Sequence               types.Int64  `tfsdk:"sequence"`
 	Enabled                types.Bool   `tfsdk:"enabled"`
 	EscalationPolicy       types.String `tfsdk:"escalation_policy"`
+	ResponsePlay           types.String `tfsdk:"response_play"`
+	ResponsePlayName       types.String `tfsdk:"response_play_name"`
 	RecipientGroups        types.List   `tfsdk:"recipient_groups"`
 	RecipientUsers         types.List   `tfsdk:"recipient_users"`
 	InboundTemplateID      types.Int64  `tfsdk:"inbound_template_id"`
+	APIURL                 types.String `tfsdk:"api_url"`
 	ExtraAttributes        types.Map    `tfsdk:"extra_attributes"`
+}
+
+// defaultAPISettings mirrors what the AlertOps UI sends for a "Custom" API integration.
+// The API rejects API-type integrations without a URL mapping source.
+func defaultAPISettings() map[string]interface{} {
+	return map[string]interface{}{
+		"url_mapping": map[string]interface{}{
+			"method":       "POST",
+			"content":      "JSON",
+			"source":       "Custom",
+			"source_name":  "Custom",
+			"static":       true,
+			"source_value": "Custom",
+			"open_alert_when": map[string]interface{}{
+				"field_name": "Body",
+				"type":       "Contains Any ",
+				"values":     []string{""},
+			},
+		},
+	}
 }
 
 func (r *InboundIntegrationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -63,7 +88,7 @@ func (r *InboundIntegrationResource) Schema(_ context.Context, _ resource.Schema
 			},
 			"type": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The type of inbound integration (e.g., `API`, `Email`, `Heartbeat`).",
+				MarkdownDescription: "The type of inbound integration (e.g., `API`, `Email`, `Heartbeat`). For `API` integrations created without `api_settings` in `extra_attributes`, the provider sends the same default URL mapping as the AlertOps \"Custom\" template.",
 			},
 			"sequence": schema.Int64Attribute{
 				Optional:            true,
@@ -80,7 +105,16 @@ func (r *InboundIntegrationResource) Schema(_ context.Context, _ resource.Schema
 			"escalation_policy": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "The name of the escalation policy to use for this integration.",
+				MarkdownDescription: "The name of the escalation policy to use for this integration. Conflicts with `response_play`.",
+			},
+			"response_play": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "The ID of the response play to use for this integration (e.g. `alertops_response_play.example.id`). Conflicts with `escalation_policy`.",
+			},
+			"response_play_name": schema.StringAttribute{
+				Computed:            true,
+				MarkdownDescription: "The name of the response play used by this integration.",
 			},
 			"recipient_groups": schema.ListAttribute{
 				Optional:            true,
@@ -100,12 +134,37 @@ func (r *InboundIntegrationResource) Schema(_ context.Context, _ resource.Schema
 				Default:             int64default.StaticInt64(0),
 				MarkdownDescription: "The ID of the inbound template to use for this integration.",
 			},
+			"api_url": schema.StringAttribute{
+				Computed:            true,
+				Sensitive:           true,
+				MarkdownDescription: "The generated endpoint URL that monitoring tools post alerts to. Contains a secret token, so it is marked sensitive.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"extra_attributes": schema.MapAttribute{
 				Optional:            true,
 				ElementType:         types.StringType,
 				MarkdownDescription: "Additional fields to pass directly to the AlertOps API. If the API rejects a field or value, the raw API error is returned. Use this for complex nested fields like `api_settings`, `email_settings`, etc.",
 			},
 		},
+	}
+}
+
+func (r *InboundIntegrationResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var config inboundIntegrationModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if isKnown(config.EscalationPolicy) && config.EscalationPolicy.ValueString() != "" &&
+		isKnown(config.ResponsePlay) && config.ResponsePlay.ValueString() != "" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("response_play"),
+			"Conflicting attributes",
+			"An inbound integration can use either an escalation_policy or a response_play, not both.",
+		)
 	}
 }
 
@@ -122,7 +181,8 @@ func (r *InboundIntegrationResource) Configure(_ context.Context, req resource.C
 	r.client = client
 }
 
-func buildInboundPayload(ctx context.Context, plan *inboundIntegrationModel) (map[string]interface{}, error) {
+// buildInboundBasicPayload builds the fields accepted by both the create and `/basic` update endpoints.
+func buildInboundBasicPayload(ctx context.Context, plan *inboundIntegrationModel) (map[string]interface{}, error) {
 	payload := map[string]interface{}{
 		"inbound_integration_name": plan.InboundIntegrationName.ValueString(),
 		"type":                     plan.Type.ValueString(),
@@ -130,7 +190,9 @@ func buildInboundPayload(ctx context.Context, plan *inboundIntegrationModel) (ma
 		"enabled":                  plan.Enabled.ValueBool(),
 		"inbound_template_id":      plan.InboundTemplateID.ValueInt64(),
 	}
-	if v := plan.EscalationPolicy.ValueString(); v != "" {
+	if isKnown(plan.ResponsePlay) && plan.ResponsePlay.ValueString() != "" {
+		payload["response_play"] = plan.ResponsePlay.ValueString()
+	} else if v := plan.EscalationPolicy.ValueString(); isKnown(plan.EscalationPolicy) && v != "" {
 		payload["escalation_policy"] = v
 	}
 	if !plan.RecipientGroups.IsNull() && !plan.RecipientGroups.IsUnknown() {
@@ -147,8 +209,23 @@ func buildInboundPayload(ctx context.Context, plan *inboundIntegrationModel) (ma
 		}
 		payload["recipient_users"] = users
 	}
-	mergeExtraAttributes(ctx, plan.ExtraAttributes, payload)
 	return payload, nil
+}
+
+func buildInboundPayload(ctx context.Context, plan *inboundIntegrationModel) (map[string]interface{}, error) {
+	payload, err := buildInboundBasicPayload(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	mergeExtraAttributes(ctx, plan.ExtraAttributes, payload)
+	if _, ok := payload["api_settings"]; !ok && strings.EqualFold(plan.Type.ValueString(), "API") {
+		payload["api_settings"] = defaultAPISettings()
+	}
+	return payload, nil
+}
+
+func hasExtraAttributes(m types.Map) bool {
+	return !m.IsNull() && !m.IsUnknown() && len(m.Elements()) > 0
 }
 
 func parseInboundFromAPI(ctx context.Context, result map[string]interface{}, state *inboundIntegrationModel) error {
@@ -171,9 +248,16 @@ func parseInboundFromAPI(ctx context.Context, result map[string]interface{}, sta
 	} else {
 		state.EscalationPolicy = types.StringValue("")
 	}
+	if id := mapInt64(result, "response_play_id"); id > 0 {
+		state.ResponsePlay = types.StringValue(fmt.Sprintf("%d", id))
+	} else {
+		state.ResponsePlay = types.StringValue("")
+	}
+	state.ResponsePlayName = types.StringValue(mapString(result, "response_play_name"))
 	if v, ok := result["inbound_template_id"].(float64); ok {
 		state.InboundTemplateID = types.Int64Value(int64(v))
 	}
+	state.APIURL = types.StringValue(mapString(result, "api_url"))
 
 	if rawGroups, ok := result["recipient_groups"].([]interface{}); ok {
 		var groups []string
@@ -262,6 +346,10 @@ func (r *InboundIntegrationResource) Read(ctx context.Context, req resource.Read
 
 	respBody, err := r.client.Get(ctx, "/integrations/inbound/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Error reading inbound integration", err.Error())
 		return
 	}
@@ -293,15 +381,50 @@ func (r *InboundIntegrationResource) Update(ctx context.Context, req resource.Up
 		return
 	}
 
-	payload, err := buildInboundPayload(ctx, &plan)
-	if err != nil {
-		resp.Diagnostics.AddError("Error building inbound integration payload", err.Error())
-		return
+	basePath := "/integrations/inbound/" + state.ID.ValueString()
+
+	if hasExtraAttributes(plan.ExtraAttributes) {
+		// Full update: the API requires the complete payload (including api_settings for
+		// API integrations), so keep the current settings unless they are overridden.
+		payload, err := buildInboundPayload(ctx, &plan)
+		if err != nil {
+			resp.Diagnostics.AddError("Error building inbound integration payload", err.Error())
+			return
+		}
+		if extra := plan.ExtraAttributes.Elements(); extra["api_settings"] == nil && strings.EqualFold(plan.Type.ValueString(), "API") {
+			currentBody, err := r.client.Get(ctx, basePath)
+			if err != nil {
+				resp.Diagnostics.AddError("Error reading inbound integration before update", err.Error())
+				return
+			}
+			current, err := decodeObject(currentBody)
+			if err != nil {
+				resp.Diagnostics.AddError("Error parsing inbound integration response", err.Error())
+				return
+			}
+			if settings, ok := current["api_settings"].(map[string]interface{}); ok {
+				payload["api_settings"] = settings
+			}
+		}
+		if _, err := r.client.Put(ctx, basePath, payload); err != nil {
+			resp.Diagnostics.AddError("Error updating inbound integration", err.Error())
+			return
+		}
+	} else {
+		payload, err := buildInboundBasicPayload(ctx, &plan)
+		if err != nil {
+			resp.Diagnostics.AddError("Error building inbound integration payload", err.Error())
+			return
+		}
+		if _, err := r.client.Put(ctx, basePath+"/basic", payload); err != nil {
+			resp.Diagnostics.AddError("Error updating inbound integration", err.Error())
+			return
+		}
 	}
 
-	respBody, err := r.client.Put(ctx, "/integrations/inbound/"+state.ID.ValueString(), payload)
+	respBody, err := r.client.Get(ctx, basePath)
 	if err != nil {
-		resp.Diagnostics.AddError("Error updating inbound integration", err.Error())
+		resp.Diagnostics.AddError("Error reading inbound integration after update", err.Error())
 		return
 	}
 
@@ -329,6 +452,9 @@ func (r *InboundIntegrationResource) Delete(ctx context.Context, req resource.De
 
 	_, err := r.client.Delete(ctx, "/integrations/inbound/"+state.ID.ValueString())
 	if err != nil {
+		if IsNotFound(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Error deleting inbound integration", err.Error())
 		return
 	}

@@ -58,7 +58,7 @@ resource "alertops_user" "example" {
       sequence              = 1
     },
     {
-      contact_method_name   = "Phone-Work"
+      contact_method_name   = "Phone-Official"
       country_code          = "1"
       phone_number          = "5555550100"
       phone_extension       = ""
@@ -71,7 +71,7 @@ resource "alertops_user" "example" {
       sequence              = 2
     },
     {
-      contact_method_name   = "SMS-Work"
+      contact_method_name   = "SMS-Official"
       country_code          = "1"
       phone_number          = "5555550100"
       wait_time_in_mins     = 10
@@ -106,7 +106,7 @@ resource "alertops_user" "example" {
 
 Each entry supports the following attributes:
 
-- `contact_method_name` (String, Required) The contact method type. Common values: `Email-Official`, `Email-Work`, `Phone-Work`, `SMS-Work`. Names beginning with `SMS` are sent as SMS; others beginning with `Phone` use voice.
+- `contact_method_name` (String, Required) The contact method type. Names are defined per AlertOps account; the defaults are `Email-Official`, `Email-Personal`, `Phone-Official`, `Phone-Official-Mobile`, `Phone-Personal`, `Phone-Personal-Mobile`, `SMS-Official`, `SMS-Personal` and `Push Notification`. Any other name is rejected with `Invalid Contact Method Type`.
 - `email_address` (String, Optional) Email address. Required when the contact method name indicates email.
 - `country_code` (String, Optional) Country dialing code for phone/SMS contact methods (e.g., `1` for US/Canada).
 - `phone_number` (String, Optional) Phone number digits (no dashes or spaces) for phone/SMS contact methods.

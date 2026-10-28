@@ -47,9 +47,14 @@ resource "alertops_escalation_policy" "critical" {
 
 ```terraform
 resource "alertops_escalation_policy" "tiered" {
-  escalation_policy_name                        = "Tiered Escalation"
-  priority                                      = "High"
-  wait_time_before_notifying_next_group_in_min  = 15
+  escalation_policy_name                       = "Tiered Escalation"
+  description                                  = "Primary on-call with retries"
+  priority                                     = "High"
+  wait_time_before_notifying_next_group_in_min = 15
+
+  # Per-role retries and contact methods require policy-level (centralized) settings;
+  # with user settings AlertOps requires no_of_retries = 0 and no contact_methods.
+  notify_using_centralized_settings = true
 
   member_roles = [
     {
@@ -63,6 +68,7 @@ resource "alertops_escalation_policy" "tiered" {
           contact_method_name = "Email-Official"
           wait_time_in_mins   = 0
           sequence            = 1
+          to_bcc_or_cc        = "To" # required for email contact methods
         }
       ]
     }
@@ -78,7 +84,7 @@ resource "alertops_escalation_policy" "tiered" {
 
 ### Optional
 
-- `description` (String) A description of the escalation policy.
+- `description` (String) A description of the escalation policy. Although optional in the schema, the AlertOps API rejects an empty description when creating a policy.
 - `priority` (String) The alert priority level. Valid values: `Low`, `Medium`, `High`, `Critical`.
 - `enabled` (Boolean) Whether the escalation policy is active. Defaults to `true`.
 - `quick_launch` (Boolean) Whether quick launch is enabled for this policy. Defaults to `false`.
@@ -86,6 +92,7 @@ resource "alertops_escalation_policy" "tiered" {
 - `wait_time_before_notifying_next_group_in_min` (Number) Minutes to wait before escalating to the next group. Defaults to `0`.
 - `options` (Object) Notification and SLA options. See [options](#nestedblock--options) below.
 - `member_roles` (List of Object) Ordered list of member roles defining the notification chain. See [member_roles](#nestedblock--member_roles) below.
+- `workflows` (Set of Number) IDs of workflows attached to the policy, e.g. `[alertops_workflow.example.id]`. When set, exactly these workflows are attached — including the default "Stop Delivery on Assignment or Closed" workflow AlertOps adds to new policies, which is detached unless listed. Only enabled workflows can be attached. When omitted, attached workflows are not managed.
 - `extra_attributes` (Map of String) Additional fields to merge into the API request payload.
 
 ### `options`
@@ -109,13 +116,13 @@ Each entry in `member_roles` defines a tier in the escalation chain:
 
 ### `member_roles.contact_methods`
 
-- `contact_method_name` (String, Required) The contact method name (e.g., `Email-Official`, `Phone-Work`).
+- `contact_method_name` (String, Required) The contact method name (e.g., `Email-Official`, `Phone-Official`).
 - `wait_time_in_mins` (Number, Required) Minutes to wait before using this contact method.
 - `sequence` (Number, Required) The order in which this contact method is used.
 - `repeat` (Boolean, Optional) Whether to retry this contact method. Defaults to `false`.
 - `repeat_times` (Number, Optional) Number of retry attempts. Defaults to `0`.
 - `repeat_minutes` (Number, Optional) Minutes between retries. Defaults to `0`.
-- `to_bcc_or_cc` (String, Optional) Whether to BCC or CC this contact method on notifications.
+- `to_bcc_or_cc` (String, Optional) For email contact methods: `To`, `CC` or `BCC`. Required by the API for email methods.
 
 ## Attributes Reference
 
