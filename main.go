@@ -19,7 +19,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/alertops/alertops",
+		Address: "registry.terraform.io/alertopsofficial/alertops",
 		Debug:   debug,
 	}
 
