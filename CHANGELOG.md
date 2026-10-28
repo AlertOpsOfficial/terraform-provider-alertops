@@ -2,6 +2,10 @@
 
 ## 2.1.0 (unreleased)
 
+### Registry namespace
+
+- The provider is now published as `alertopsofficial/alertops`. Change `source = "kamsrikanth/alertops"` to `source = "alertopsofficial/alertops"` in `required_providers`, then run `terraform init -upgrade` and `terraform state replace-provider registry.terraform.io/kamsrikanth/alertops registry.terraform.io/alertopsofficial/alertops`.
+
 ### New resources
 
 - `alertops_response_play` — response plays with an ordered escalation path of users and groups, per-tier wait times, group contact methods, repeat settings, communication options and attached workflows. ([#5](https://github.com/AlertOpsOfficial/terraform-provider-alertops/issues/5))
